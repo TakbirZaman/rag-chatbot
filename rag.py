@@ -1,6 +1,6 @@
 """
 RAG Chatbot — PDF/Document Q&A
-No LangChain chains — direct Anthropic API calls only (more stable)
+Uses ChromaDB default embeddings (no sentence-transformers needed)
 """
 import os, tempfile
 import streamlit as st
@@ -12,16 +12,16 @@ os.environ["ANTHROPIC_API_KEY"] = st.secrets.get(
 import anthropic
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
-from langchain_community.embeddings import SentenceTransformerEmbeddings
-from langchain_community.vectorstores import Chroma
+import chromadb
+from chromadb.utils import embedding_functions
 
 # ── page config ───────────────────────────────────────────────────────────────
 st.set_page_config(page_title="RAG Chatbot", page_icon="📄", layout="wide")
 st.title("📄 Document Q&A — RAG Chatbot")
 st.caption("Upload a PDF or text file, then ask questions about it.")
 
-if "retriever" not in st.session_state:
-    st.session_state.retriever = None
+if "collection" not in st.session_state:
+    st.session_state.collection = None
 if "history" not in st.session_state:
     st.session_state.history = []
 
@@ -31,7 +31,7 @@ with st.sidebar:
     uploaded = st.file_uploader("PDF or TXT", type=["pdf", "txt", "md"])
 
     if uploaded and st.button("Index Document"):
-        with st.spinner("Chunking + embedding..."):
+        with st.spinner("Chunking + indexing..."):
             suffix = ".pdf" if uploaded.type == "application/pdf" else ".txt"
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as f:
                 f.write(uploaded.getvalue())
@@ -43,9 +43,23 @@ with st.sidebar:
             splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
             chunks = splitter.split_documents(docs)
 
-            embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
-            vectorstore = Chroma.from_documents(chunks, embeddings)
-            st.session_state.retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
+            # ChromaDB with default embeddings (no extra package)
+            chroma_client = chromadb.Client()
+            ef = embedding_functions.DefaultEmbeddingFunction()
+
+            # delete old collection if exists
+            try:
+                chroma_client.delete_collection("rag_docs")
+            except Exception:
+                pass
+
+            collection = chroma_client.create_collection("rag_docs", embedding_function=ef)
+            collection.add(
+                documents=[c.page_content for c in chunks],
+                ids=[f"chunk_{i}" for i in range(len(chunks))]
+            )
+
+            st.session_state.collection = collection
             st.session_state.history = []
             st.success(f"✅ Indexed {len(chunks)} chunks from '{uploaded.name}'")
 
@@ -55,7 +69,7 @@ for msg in st.session_state.history:
         st.write(msg["content"])
 
 if prompt := st.chat_input("Ask about your document..."):
-    if not st.session_state.retriever:
+    if not st.session_state.collection:
         st.warning("Please upload and index a document first.")
     else:
         st.session_state.history.append({"role": "user", "content": prompt})
@@ -64,11 +78,14 @@ if prompt := st.chat_input("Ask about your document..."):
 
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                # retrieve relevant chunks
-                docs = st.session_state.retriever.invoke(prompt)
-                context = "\n\n".join(f"[{i+1}] {d.page_content}" for i, d in enumerate(docs))
+                # retrieve top-4 relevant chunks
+                results = st.session_state.collection.query(
+                    query_texts=[prompt], n_results=4
+                )
+                chunks_text = results["documents"][0]
+                context = "\n\n".join(f"[{i+1}] {c}" for i, c in enumerate(chunks_text))
 
-                # build messages for Anthropic (last 6 turns for memory)
+                # last 6 turns for memory
                 recent = st.session_state.history[-6:]
                 messages = [{"role": m["role"], "content": m["content"]} for m in recent]
 
@@ -88,8 +105,8 @@ DOCUMENT EXCERPTS:
             st.write(answer)
 
             with st.expander("📑 Source chunks"):
-                for i, doc in enumerate(docs):
-                    st.caption(f"Chunk {i+1} — page {doc.metadata.get('page', '?')}")
-                    st.text(doc.page_content[:300] + "...")
+                for i, chunk in enumerate(chunks_text):
+                    st.caption(f"Chunk {i+1}")
+                    st.text(chunk[:300] + "...")
 
         st.session_state.history.append({"role": "assistant", "content": answer})
