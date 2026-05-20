@@ -1,35 +1,31 @@
 """
 RAG Chatbot — PDF/Document Q&A
-Stack: LangChain + ChromaDB + Anthropic (Claude) + Streamlit
+No LangChain chains — direct Anthropic API calls only (more stable)
 """
 import os, tempfile
 import streamlit as st
 
-# ── API key (Streamlit Cloud secrets or local .env) ───────────────────────────
 os.environ["ANTHROPIC_API_KEY"] = st.secrets.get(
     "ANTHROPIC_API_KEY", os.getenv("ANTHROPIC_API_KEY", "")
 )
 
+import anthropic
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
-from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import SentenceTransformerEmbeddings
-from langchain_anthropic import ChatAnthropic
-from langchain.chains import ConversationalRetrievalChain
-from langchain.memory import ConversationBufferMemory
+from langchain_community.vectorstores import Chroma
 
 # ── page config ───────────────────────────────────────────────────────────────
 st.set_page_config(page_title="RAG Chatbot", page_icon="📄", layout="wide")
 st.title("📄 Document Q&A — RAG Chatbot")
 st.caption("Upload a PDF or text file, then ask questions about it.")
 
-# ── session state ──────────────────────────────────────────────────────────────
-if "chain" not in st.session_state:
-    st.session_state.chain = None
+if "retriever" not in st.session_state:
+    st.session_state.retriever = None
 if "history" not in st.session_state:
     st.session_state.history = []
 
-# ── sidebar: upload ────────────────────────────────────────────────────────────
+# ── sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("📂 Upload Document")
     uploaded = st.file_uploader("PDF or TXT", type=["pdf", "txt", "md"])
@@ -49,27 +45,17 @@ with st.sidebar:
 
             embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
             vectorstore = Chroma.from_documents(chunks, embeddings)
-            retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
-
-            llm = ChatAnthropic(model="claude-sonnet-4-20250514", temperature=0)
-
-            memory = ConversationBufferMemory(
-                memory_key="chat_history", return_messages=True, output_key="answer"
-            )
-            st.session_state.chain = ConversationalRetrievalChain.from_llm(
-                llm=llm, retriever=retriever, memory=memory,
-                return_source_documents=True
-            )
+            st.session_state.retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
             st.session_state.history = []
             st.success(f"✅ Indexed {len(chunks)} chunks from '{uploaded.name}'")
 
-# ── chat UI ────────────────────────────────────────────────────────────────────
+# ── chat UI ───────────────────────────────────────────────────────────────────
 for msg in st.session_state.history:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
 if prompt := st.chat_input("Ask about your document..."):
-    if not st.session_state.chain:
+    if not st.session_state.retriever:
         st.warning("Please upload and index a document first.")
     else:
         st.session_state.history.append({"role": "user", "content": prompt})
@@ -78,16 +64,32 @@ if prompt := st.chat_input("Ask about your document..."):
 
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                result = st.session_state.chain({"question": prompt})
-                answer = result["answer"]
-                sources = result.get("source_documents", [])
+                # retrieve relevant chunks
+                docs = st.session_state.retriever.invoke(prompt)
+                context = "\n\n".join(f"[{i+1}] {d.page_content}" for i, d in enumerate(docs))
+
+                # build messages for Anthropic (last 6 turns for memory)
+                recent = st.session_state.history[-6:]
+                messages = [{"role": m["role"], "content": m["content"]} for m in recent]
+
+                client = anthropic.Anthropic()
+                response = client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=1000,
+                    system=f"""You are a document assistant. Answer using ONLY the excerpts below.
+If the answer isn't there, say so clearly.
+
+DOCUMENT EXCERPTS:
+{context}""",
+                    messages=messages
+                )
+                answer = response.content[0].text
 
             st.write(answer)
 
-            if sources:
-                with st.expander("📑 Sources"):
-                    for i, doc in enumerate(sources[:3]):
-                        st.caption(f"**Chunk {i+1}** (page {doc.metadata.get('page','?')})")
-                        st.text(doc.page_content[:300] + "...")
+            with st.expander("📑 Source chunks"):
+                for i, doc in enumerate(docs):
+                    st.caption(f"Chunk {i+1} — page {doc.metadata.get('page', '?')}")
+                    st.text(doc.page_content[:300] + "...")
 
         st.session_state.history.append({"role": "assistant", "content": answer})
