@@ -1,7 +1,3 @@
 anthropic==0.40.0
-langchain-text-splitters==0.3.2
-langchain-community==0.3.7
-langchain-core==0.3.19
-chromadb==0.5.23
 pypdf==5.1.0
 streamlit==1.40.2
