@@ -150,7 +150,7 @@ else:
                         f"EXCERPTS:\n{context}"
                     )
                     genai.configure(api_key=API_KEY)
-                    model = genai.GenerativeModel("gemini-2.0-flash")
+                    model = genai.GenerativeModel("gemini-1.5-flash-latest")
                     response = model.generate_content(prompt)
                     answer = response.text
 
