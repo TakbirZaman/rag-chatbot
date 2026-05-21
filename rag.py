@@ -5,13 +5,11 @@ import streamlit as st
 from pypdf import PdfReader
 import anthropic
 
-# ── API Key ───────────────────────────────────────────────────────────────────
 try:
     API_KEY = st.secrets["ANTHROPIC_API_KEY"]
 except Exception:
     API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
 def extract_text(uploaded_file):
     if uploaded_file.type == "application/pdf":
         reader = PdfReader(uploaded_file)
@@ -69,27 +67,17 @@ def retrieve(query, chunks, vectors, idf, k=4):
     scores = sorted(enumerate(vectors), key=lambda x: cosine(qvec, x[1]), reverse=True)
     return [chunks[i] for i, _ in scores[:k]]
 
-# ── Page Setup ────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="RAG Chatbot", page_icon="📄", layout="wide")
 st.title("📄 RAG Chatbot — Document Q&A")
 st.caption("Upload a PDF or TXT file, then ask questions about it.")
 
-if "chunks" not in st.session_state:
-    st.session_state.chunks = []
-if "vectors" not in st.session_state:
-    st.session_state.vectors = []
-if "idf" not in st.session_state:
-    st.session_state.idf = {}
-if "history" not in st.session_state:
-    st.session_state.history = []
-if "doc_name" not in st.session_state:
-    st.session_state.doc_name = ""
+for key in ["chunks", "vectors", "idf", "history", "doc_name"]:
+    if key not in st.session_state:
+        st.session_state[key] = [] if key != "doc_name" else ""
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("📂 Upload Document")
     uploaded = st.file_uploader("Choose a file", type=["pdf", "txt", "md"])
-
     if uploaded:
         if st.button("Index Document", type="primary"):
             with st.spinner("Reading and indexing..."):
@@ -106,15 +94,14 @@ with st.sidebar:
                 st.session_state.doc_name = uploaded.name
                 st.session_state.history = []
                 st.success(f"✅ Done! {len(chunks)} chunks indexed.")
-
     if st.session_state.doc_name:
         st.info(f"Active: **{st.session_state.doc_name}**")
         if st.button("Clear"):
-            for k in ["chunks","vectors","idf","history","doc_name"]:
-                st.session_state[k] = [] if k != "doc_name" else ""
+            for k in ["chunks", "vectors", "idf", "history"]:
+                st.session_state[k] = []
+            st.session_state.doc_name = ""
             st.rerun()
 
-# ── Chat ──────────────────────────────────────────────────────────────────────
 if not st.session_state.doc_name:
     st.info("👈 Upload a document from the sidebar to get started.")
 else:
@@ -126,7 +113,7 @@ else:
 
     if question:
         if not API_KEY:
-            st.error("ANTHROPIC_API_KEY is missing. Add it in Streamlit Secrets.")
+            st.error("ANTHROPIC_API_KEY missing. Add it in Streamlit Secrets.")
             st.stop()
 
         st.session_state.history.append({"role": "user", "content": question})
@@ -144,28 +131,22 @@ else:
                 context = "\n\n".join(
                     f"[Excerpt {i+1}]\n{c}" for i, c in enumerate(top_chunks)
                 )
-
+                prompt = (
+                    f"Answer this question using ONLY the document excerpts below.\n"
+                    f"If the answer is not in the excerpts, say: "
+                    f"'I could not find that information in the document.'\n\n"
+                    f"Question: {question}\n\n"
+                    f"DOCUMENT EXCERPTS:\n{context}"
+                )
                 client = anthropic.Anthropic(api_key=API_KEY)
-
-                # send only ONE user message — no history, no format issues
                 response = client.messages.create(
                     model="claude-sonnet-4-20250514",
                     max_tokens=1000,
-                    system=(
-                        "You are a helpful document assistant. "
-                        "Answer the user's question using ONLY the document excerpts below. "
-                        "If the answer is not in the excerpts, say: "
-                        "'I could not find that information in the document.'\n\n"
-                        f"DOCUMENT EXCERPTS:\n{context}"
-                    ),
-                    messages=[
-                        {"role": "user", "content": question}
-                    ],
+                    messages=[{"role": "user", "content": prompt}],
                 )
                 answer = response.content[0].text
 
             st.write(answer)
-
             with st.expander("📑 View source excerpts"):
                 for i, chunk in enumerate(top_chunks):
                     st.caption(f"Excerpt {i+1}")
