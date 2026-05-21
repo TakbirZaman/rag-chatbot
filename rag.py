@@ -81,7 +81,7 @@ if "vectors" not in st.session_state:
 if "idf" not in st.session_state:
     st.session_state.idf = {}
 if "history" not in st.session_state:
-    st.session_state.history = []
+    st.session_state.history = []  # list of {"role": "user"/"assistant", "content": "..."}
 if "doc_name" not in st.session_state:
     st.session_state.doc_name = ""
 
@@ -132,12 +132,15 @@ else:
             st.error("ANTHROPIC_API_KEY is missing. Add it in Streamlit Secrets.")
             st.stop()
 
+        # show user message
         st.session_state.history.append({"role": "user", "content": question})
         with st.chat_message("user"):
             st.write(question)
 
         with st.chat_message("assistant"):
             with st.spinner("Searching document and thinking..."):
+
+                # retrieve relevant chunks
                 top_chunks = retrieve(
                     question,
                     st.session_state.chunks,
@@ -147,18 +150,30 @@ else:
                 context = "\n\n".join(
                     f"[Excerpt {i+1}]\n{c}" for i, c in enumerate(top_chunks)
                 )
+
+                # build messages — must alternate user/assistant, start with user
+                # take last 10 turns max
+                history = st.session_state.history[-10:]
+
+                # ensure it starts with a user message
+                while history and history[0]["role"] != "user":
+                    history = history[1:]
+
+                # build clean messages list
                 messages = [
                     {"role": m["role"], "content": m["content"]}
-                    for m in st.session_state.history
+                    for m in history
                 ]
+
                 client = anthropic.Anthropic(api_key=API_KEY)
                 response = client.messages.create(
                     model="claude-sonnet-4-20250514",
                     max_tokens=1000,
                     system=(
                         "You are a helpful document assistant. "
-                        "Answer the user's question using ONLY the document excerpts provided below. "
-                        "If the answer is not in the excerpts, say: 'I could not find that information in the document.'\n\n"
+                        "Answer the user's question using ONLY the document excerpts below. "
+                        "If the answer is not in the excerpts, say: "
+                        "'I could not find that information in the document.'\n\n"
                         f"DOCUMENT EXCERPTS:\n{context}"
                     ),
                     messages=messages,
