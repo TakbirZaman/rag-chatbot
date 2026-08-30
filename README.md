@@ -12,6 +12,7 @@ A document Q&A chatbot powered by **Retrieval-Augmented Generation (RAG)** using
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
+- [How to Run](#how-to-run-quick-start)
 - [Configuration](#configuration)
 - [User Manual](#user-manual)
 - [Project Structure](#project-structure)
@@ -131,6 +132,84 @@ source venv/bin/activate
 ```bash
 pip install -r requirements.txt
 ```
+
+---
+
+## How to Run (Quick Start)
+
+### Step 1: Clone & Open the Project
+
+```bash
+git clone https://github.com/TakbirZaman/rag-chatbot.git
+cd rag-chatbot
+```
+
+Open the project in your preferred editor:
+
+```bash
+# VS Code
+code .
+
+# PyCharm (CLI)
+pycharm .
+
+# Or simply open the folder from File Explorer / Finder
+```
+
+### Step 2: Set Up a Virtual Environment
+
+```bash
+python -m venv venv
+```
+
+Activate it:
+
+| OS | Command |
+|----|---------|
+| **Windows (PowerShell)** | `venv\Scripts\activate` |
+| **Windows (CMD)** | `venv\Scripts\activate.bat` |
+| **macOS / Linux** | `source venv/bin/activate` |
+
+You should see `(venv)` in your terminal prompt.
+
+### Step 3: Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### Step 4: Add Your API Key
+
+Create a `.env` file in the project root:
+
+```env
+ANTHROPIC_API_KEY=sk-ant-your-key-here
+```
+
+Get your key from [console.anthropic.com](https://console.anthropic.com/).
+
+### Step 5: Run the App
+
+```bash
+streamlit run rag.py
+```
+
+Your browser will open automatically at **http://localhost:8501**
+
+### Step 6: Use It
+
+1. **Upload** a PDF or TXT file from the sidebar
+2. Click **"Index Document"**
+3. **Ask questions** in the chat input at the bottom
+
+### Quick Reference
+
+| Action | Command |
+|--------|---------|
+| Start the app | `streamlit run rag.py` |
+| Stop the app | `Ctrl + C` in terminal |
+| Deactivate venv | `deactivate` |
+| Reinstall deps | `pip install -r requirements.txt --force-reinstall` |
 
 ---
 
